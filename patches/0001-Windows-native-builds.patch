@@ -1,0 +1,856 @@
+diff --git a/.gitignore b/.gitignore
+index e349901..e481dfd 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -40,3 +40,6 @@ Makefile
+ .Spotlight*
+ .Trash*
+ *[Tt]humbs.db
++
++# CMake build directories
++build*/
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..2556c80
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,433 @@
++cmake_minimum_required(VERSION 3.15)
++project(dash C)
++
++set(CMAKE_C_STANDARD 90)
++set(CMAKE_C_STANDARD_REQUIRED ON)
++
++include(FetchContent)
++FetchContent_Declare(
++    auto_win_msvc
++    GIT_REPOSITORY https://github.com/SamuelMarks/auto-win-msvc.git
++    GIT_TAG master
++)
++FetchContent_MakeAvailable(auto_win_msvc)
++
++set(DASH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
++set(DASH_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
++file(MAKE_DIRECTORY "${DASH_GEN_DIR}")
++
++# Generate config.h
++file(WRITE "${DASH_GEN_DIR}/config.h" "
++#ifndef DASH_CONFIG_H
++#define DASH_CONFIG_H
++
++#define BSD 1
++#define SHELL 1
++
++#define HAVE_ALLOCA_H 1
++#define HAVE_PATHS_H 1
++#define HAVE_SYS_WAIT_H 1
++#define HAVE_F_DUPFD_CLOEXEC 1
++#define HAVE_BSEARCH 1
++#define HAVE_FACCESSAT 1
++#define HAVE_GETPWNAM 1
++#define HAVE_GETRLIMIT 1
++#define HAVE_ISALPHA 1
++#define HAVE_KILLPG 1
++#define HAVE_MEMFD_CREATE 1
++#define HAVE_MEMRCHR 1
++#define HAVE_MEMPCPY 1
++#define HAVE_SIGSETMASK 1
++#define HAVE_STPCPY 1
++#define HAVE_STRCHRNUL 1
++#define HAVE_STRSIGNAL 1
++#define HAVE_STRTOD 1
++#define HAVE_STRTOIMAX 1
++#define HAVE_STRTOUMAX 1
++#define HAVE_SYSCONF 1
++#define HAVE_WAIT3 1
++#define HAVE_FNMATCH 1
++#define HAVE_GLOB 1
++#define HAVE_DECL_ISBLANK 1
++
++#define USE_MEMFD_CREATE 1
++#define USE_TEE 0
++
++#if defined(_WIN32)
++#define _PATH_BSHELL \"dash.exe\"
++#define _PATH_DEVNULL \"NUL\"
++#define _PATH_TTY \"CON\"
++#else
++#define _PATH_BSHELL \"/bin/sh\"
++#define _PATH_DEVNULL \"/dev/null\"
++#define _PATH_TTY \"/dev/tty\"
++#endif
++
++#define SMALL 1
++#define WITH_LINENO 1
++
++#if defined(_MSC_VER)
++#define inline __inline
++#define __attribute__(x)
++#endif
++
++#ifndef PATH_MAX
++#define PATH_MAX 4096
++#endif
++
++#define stat64 stat
++#define fstat64 fstat
++#define lstat64 lstat
++#define open64 open
++#define readdir64 readdir
++#define dirent64 dirent
++#define glob64_t glob_t
++#define glob64 glob
++#define globfree64 globfree
++
++#include \"posix-strings.h\"
++
++#endif /* DASH_CONFIG_H */
++")
++
++# Helper tools: mknodes, mksyntax, mksignames, mkinit
++add_executable(mknodes "${DASH_SRC_DIR}/mknodes.c")
++add_executable(mksyntax "${DASH_SRC_DIR}/mksyntax.c")
++target_include_directories(mksyntax PRIVATE "${DASH_SRC_DIR}" "${DASH_GEN_DIR}")
++add_executable(mksignames "${DASH_SRC_DIR}/mksignames.c")
++add_executable(mkinit "${DASH_SRC_DIR}/mkinit.c")
++
++
++
++# token.h and token_vars.h
++file(WRITE "${DASH_GEN_DIR}/token.h" "
++#define TEOF 0
++#define TBLANK 1
++#define TNL 2
++#define TSEMI 3
++#define TBACKGND 4
++#define TAND 5
++#define TOR 6
++#define TPIPE 7
++#define TLP 8
++#define TRP 9
++#define TENDCASE 10
++#define TENDBQUOTE 11
++#define TREDIR 12
++#define TWORD 13
++#define TNOT 14
++#define TCASE 15
++#define TDO 16
++#define TDONE 17
++#define TELIF 18
++#define TELSE 19
++#define TESAC 20
++#define TFI 21
++#define TFOR 22
++#define TIF 23
++#define TIN 24
++#define TTHEN 25
++#define TUNTIL 26
++#define TWHILE 27
++#define TBEGIN 28
++#define TEND 29
++")
++
++file(WRITE "${DASH_GEN_DIR}/token_vars.h" "
++static const char tokendlist[] = {
++	1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
++	1, 1, 0, 0, 0, 0, 1, 1, 1, 1,
++	1, 1, 0, 0, 0, 1, 0, 0, 0, 1,
++};
++
++static const char *const tokname[] = {
++	\"end of file\",
++	\"blank\",
++	\"newline\",
++	\"\\\";\\\"\",
++	\"\\\"&\\\"\",
++	\"\\\"&&\\\"\",
++	\"\\\"||\\\"\",
++	\"\\\"|\\\"\",
++	\"\\\"(\\\"\",
++	\"\\\")\\\"\",
++	\"\\\";;\\\"\",
++	\"\\\"`\\\"\",
++	\"redirection\",
++	\"word\",
++	\"\\\"!\\\"\",
++	\"\\\"case\\\"\",
++	\"\\\"do\\\"\",
++	\"\\\"done\\\"\",
++	\"\\\"elif\\\"\",
++	\"\\\"else\\\"\",
++	\"\\\"esac\\\"\",
++	\"\\\"fi\\\"\",
++	\"\\\"for\\\"\",
++	\"\\\"if\\\"\",
++	\"\\\"in\\\"\",
++	\"\\\"then\\\"\",
++	\"\\\"until\\\"\",
++	\"\\\"while\\\"\",
++	\"\\\"{\\\"\",
++	\"\\\"}\\\"\",
++};
++
++#define KWDOFFSET 14
++
++static const char *const parsekwd[] = {
++	\"!\",
++	\"case\",
++	\"do\",
++	\"done\",
++	\"elif\",
++	\"else\",
++	\"esac\",
++	\"fi\",
++	\"for\",
++	\"if\",
++	\"in\",
++	\"then\",
++	\"until\",
++	\"while\",
++	\"{\",
++	\"}\"
++};
++")
++
++# nodes.c and nodes.h
++add_custom_command(
++    OUTPUT "${DASH_GEN_DIR}/nodes.c" "${DASH_GEN_DIR}/nodes.h"
++    COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:mknodes> "${DASH_SRC_DIR}/nodetypes" "${DASH_SRC_DIR}/nodes.c.pat"
++    WORKING_DIRECTORY "${DASH_GEN_DIR}"
++    DEPENDS mknodes "${DASH_SRC_DIR}/nodetypes" "${DASH_SRC_DIR}/nodes.c.pat"
++    COMMENT "Generating nodes.c and nodes.h"
++)
++
++# syntax.c and syntax.h
++add_custom_command(
++    OUTPUT "${DASH_GEN_DIR}/syntax.c" "${DASH_GEN_DIR}/syntax.h"
++    COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:mksyntax>
++    WORKING_DIRECTORY "${DASH_GEN_DIR}"
++    DEPENDS mksyntax "${DASH_GEN_DIR}/token.h"
++    COMMENT "Generating syntax.c and syntax.h"
++)
++
++# signames.c
++add_custom_command(
++    OUTPUT "${DASH_GEN_DIR}/signames.c"
++    COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:mksignames>
++    WORKING_DIRECTORY "${DASH_GEN_DIR}"
++    DEPENDS mksignames
++    COMMENT "Generating signames.c"
++)
++
++# builtins.c and builtins.h
++file(WRITE "${DASH_GEN_DIR}/builtins.h" "
++#ifndef DASH_BUILTINS_H
++#define DASH_BUILTINS_H
++
++#define ALIASCMD (builtincmd + 3)
++#define BGCMD (builtincmd + 4)
++#define BREAKCMD (builtincmd + 5)
++#define CDCMD (builtincmd + 6)
++#define COMMANDCMD (builtincmd + 8)
++#define DOTCMD (builtincmd + 0)
++#define ECHOCMD (builtincmd + 10)
++#define EVALCMD (builtincmd + 11)
++#define EXECCMD (builtincmd + 12)
++#define EXITCMD (builtincmd + 13)
++#define EXPORTCMD (builtincmd + 14)
++#define FALSECMD (builtincmd + 15)
++#define FGCMD (builtincmd + 16)
++#define GETOPTSCMD (builtincmd + 17)
++#define HASHCMD (builtincmd + 18)
++#define JOBSCMD (builtincmd + 19)
++#define KILLCMD (builtincmd + 20)
++#define LOCALCMD (builtincmd + 21)
++#define PRINTFCMD (builtincmd + 22)
++#define PWDCMD (builtincmd + 23)
++#define READCMD (builtincmd + 24)
++#define RETURNCMD (builtincmd + 26)
++#define SETCMD (builtincmd + 27)
++#define SHIFTCMD (builtincmd + 28)
++#define TESTCMD (builtincmd + 2)
++#define TIMESCMD (builtincmd + 30)
++#define TRAPCMD (builtincmd + 31)
++#define TRUECMD (builtincmd + 1)
++#define TYPECMD (builtincmd + 33)
++#define UMASKCMD (builtincmd + 34)
++#define UNALIASCMD (builtincmd + 35)
++#define UNSETCMD (builtincmd + 36)
++#define WAITCMD (builtincmd + 37)
++
++#define NUMBUILTINS 38
++
++#define BUILTIN_SPECIAL 0x1
++#define BUILTIN_REGULAR 0x2
++#define BUILTIN_ASSIGN 0x4
++
++struct builtincmd {
++	const char *name;
++	int (*builtin)(int, char **);
++	unsigned flags;
++};
++
++extern const struct builtincmd builtincmd[];
++
++#endif /* DASH_BUILTINS_H */
++")
++
++file(WRITE "${DASH_GEN_DIR}/builtins.c" "
++#include \"shell.h\"
++#include \"builtins.h\"
++
++int bgcmd(int, char **);
++int fgcmd(int, char **);
++int breakcmd(int, char **);
++int cdcmd(int, char **);
++int commandcmd(int, char **);
++int dotcmd(int, char **);
++int echocmd(int, char **);
++int evalcmd(int, char **);
++int execcmd(int, char **);
++int exitcmd(int, char **);
++int exportcmd(int, char **);
++int falsecmd(int, char **);
++int getoptscmd(int, char **);
++int hashcmd(int, char **);
++int jobscmd(int, char **);
++int localcmd(int, char **);
++int printfcmd(int, char **);
++int pwdcmd(int, char **);
++int readcmd(int, char **);
++int returncmd(int, char **);
++int setcmd(int, char **);
++int shiftcmd(int, char **);
++int timescmd(int, char **);
++int trapcmd(int, char **);
++int truecmd(int, char **);
++int typecmd(int, char **);
++int umaskcmd(int, char **);
++int unaliascmd(int, char **);
++int unsetcmd(int, char **);
++int waitcmd(int, char **);
++int aliascmd(int, char **);
++int testcmd(int, char **);
++int killcmd(int, char **);
++
++const struct builtincmd builtincmd[] = {
++	{ \".\", dotcmd, 3 },
++	{ \":\", truecmd, 3 },
++	{ \"[\", testcmd, 0 },
++	{ \"alias\", aliascmd, 6 },
++	{ \"bg\", bgcmd, 2 },
++	{ \"break\", breakcmd, 3 },
++	{ \"cd\", cdcmd, 2 },
++	{ \"chdir\", cdcmd, 0 },
++	{ \"command\", commandcmd, 2 },
++	{ \"continue\", breakcmd, 3 },
++	{ \"echo\", echocmd, 0 },
++	{ \"eval\", NULL, 3 },
++	{ \"exec\", execcmd, 3 },
++	{ \"exit\", exitcmd, 3 },
++	{ \"export\", exportcmd, 7 },
++	{ \"false\", falsecmd, 2 },
++	{ \"fg\", fgcmd, 2 },
++	{ \"getopts\", getoptscmd, 2 },
++	{ \"hash\", hashcmd, 2 },
++	{ \"jobs\", jobscmd, 2 },
++	{ \"kill\", killcmd, 2 },
++	{ \"local\", localcmd, 7 },
++	{ \"printf\", printfcmd, 0 },
++	{ \"pwd\", pwdcmd, 2 },
++	{ \"read\", readcmd, 2 },
++	{ \"readonly\", exportcmd, 7 },
++	{ \"return\", returncmd, 3 },
++	{ \"set\", setcmd, 3 },
++	{ \"shift\", shiftcmd, 3 },
++	{ \"test\", testcmd, 0 },
++	{ \"times\", timescmd, 3 },
++	{ \"trap\", trapcmd, 3 },
++	{ \"true\", truecmd, 2 },
++	{ \"type\", typecmd, 2 },
++	{ \"umask\", umaskcmd, 2 },
++	{ \"unalias\", unaliascmd, 2 },
++	{ \"unset\", unsetcmd, 3 },
++	{ \"wait\", waitcmd, 2 },
++};
++")
++
++set(DASH_CORE_SOURCES
++    "${DASH_SRC_DIR}/alias.c"
++    "${DASH_SRC_DIR}/arith_yacc.c"
++    "${DASH_SRC_DIR}/arith_yylex.c"
++    "${DASH_SRC_DIR}/cd.c"
++    "${DASH_SRC_DIR}/error.c"
++    "${DASH_SRC_DIR}/eval.c"
++    "${DASH_SRC_DIR}/exec.c"
++    "${DASH_SRC_DIR}/expand.c"
++    "${DASH_SRC_DIR}/histedit.c"
++    "${DASH_SRC_DIR}/input.c"
++    "${DASH_SRC_DIR}/jobs.c"
++    "${DASH_SRC_DIR}/mail.c"
++    "${DASH_SRC_DIR}/main.c"
++    "${DASH_SRC_DIR}/memalloc.c"
++    "${DASH_SRC_DIR}/miscbltin.c"
++    "${DASH_SRC_DIR}/mystring.c"
++    "${DASH_SRC_DIR}/options.c"
++    "${DASH_SRC_DIR}/parser.c"
++    "${DASH_SRC_DIR}/redir.c"
++    "${DASH_SRC_DIR}/show.c"
++    "${DASH_SRC_DIR}/trap.c"
++    "${DASH_SRC_DIR}/output.c"
++    "${DASH_SRC_DIR}/bltin/printf.c"
++    "${DASH_SRC_DIR}/system.c"
++    "${DASH_SRC_DIR}/bltin/test.c"
++    "${DASH_SRC_DIR}/bltin/times.c"
++    "${DASH_SRC_DIR}/var.c"
++)
++
++# init.c
++add_custom_command(
++    OUTPUT "${DASH_GEN_DIR}/init.c"
++    COMMAND ${CMAKE_CROSSCOMPILING_EMULATOR} $<TARGET_FILE:mkinit> ${DASH_CORE_SOURCES}
++    WORKING_DIRECTORY "${DASH_GEN_DIR}"
++    DEPENDS mkinit ${DASH_CORE_SOURCES}
++    COMMENT "Generating init.c"
++)
++
++add_executable(dash
++    ${DASH_CORE_SOURCES}
++    "${DASH_GEN_DIR}/builtins.c"
++    "${DASH_GEN_DIR}/init.c"
++    "${DASH_GEN_DIR}/nodes.c"
++    "${DASH_GEN_DIR}/signames.c"
++    "${DASH_GEN_DIR}/syntax.c"
++)
++
++target_include_directories(dash PRIVATE
++    "${DASH_GEN_DIR}"
++    "${DASH_SRC_DIR}"
++    "${DASH_SRC_DIR}/bltin"
++)
++
++if(MSVC)
++    target_compile_options(dash PRIVATE /FIconfig.h)
++else()
++    target_compile_options(dash PRIVATE -include config.h)
++endif()
++
++target_compile_definitions(dash PRIVATE
++    -DBSD=1
++    -DSHELL=1
++    -DSMALL=1
++    -DWITH_LINENO=1
++)
++
++if(TARGET auto-win-msvc)
++    target_link_libraries(dash PRIVATE auto-win-msvc)
++endif()
++
++enable_testing()
++add_test(NAME test_dash_basic COMMAND dash -c "echo DASH test ok")
+diff --git a/src/bltin/bltin.h b/src/bltin/bltin.h
+index f5ac06f..7a318ba 100644
+--- a/src/bltin/bltin.h
++++ b/src/bltin/bltin.h
+@@ -47,6 +47,7 @@
+ #include "../memalloc.h"
+ #include "../output.h"
+ #include "../error.h"
++#include <stdio.h>
+ #ifndef USE_GLIBC_STDIO
+ #undef stdout
+ #undef stderr
+diff --git a/src/bltin/printf.c b/src/bltin/printf.c
+index 5355f5d..0643e07 100644
+--- a/src/bltin/printf.c
++++ b/src/bltin/printf.c
+@@ -73,21 +73,23 @@ static char  **gargv;
+ 	} \
+ }
+ 
+-#define ASPF(sp, f, func) ({ \
+-	int ret; \
+-	switch ((char *)param - (char *)array) { \
+-	default: \
+-		ret = xasprintf(sp, f, array[0], array[1], func); \
+-		break; \
+-	case sizeof(*param): \
+-		ret = xasprintf(sp, f, array[0], func); \
+-		break; \
+-	case 0: \
+-		ret = xasprintf(sp, f, func); \
+-		break; \
+-	} \
+-	ret; \
+-})
++static int aspf_helper(char **sp, const char *f, const char *func,
++                       int *param, int *array) {
++	int ret;
++	switch ((char *)param - (char *)array) {
++	default:
++		ret = xasprintf(sp, f, array[0], array[1], func);
++		break;
++	case sizeof(*param):
++		ret = xasprintf(sp, f, array[0], func);
++		break;
++	case 0:
++		ret = xasprintf(sp, f, func);
++		break;
++	}
++	return ret;
++}
++#define ASPF(sp, f, func) aspf_helper(sp, f, func, param, array)
+ 
+ 
+ static int print_escape_str(const char *f, int *param, int *array, char *s)
+@@ -587,7 +589,7 @@ echocmd(int argc, char **argv)
+ 		if (!s || !*++argv)
+ 			fmt = lastfmt;
+ 
+-		nonl = print_escape_str(fmt, NULL, NULL, s ?: nullstr);
++		nonl = print_escape_str(fmt, NULL, NULL, s ? s : nullstr);
+ 	} while (!nonl && *argv);
+ 	return 0;
+ }
+diff --git a/src/error.c b/src/error.c
+index 728ff88..ee2d8b4 100644
+--- a/src/error.c
++++ b/src/error.c
+@@ -161,7 +161,7 @@ exverror(int cond, const char *msg, va_list ap)
+ #endif
+ 		exvwarning(-1, msg, ap);
+ 
+-	flushall();
++	sh_flushall();
+ 	exraise(cond);
+ 	/* NOTREACHED */
+ }
+diff --git a/src/error.h b/src/error.h
+index 661a8a0..b13e996 100644
+--- a/src/error.h
++++ b/src/error.h
+@@ -80,6 +80,40 @@ extern int exception;
+ extern int suppressint;
+ extern volatile sig_atomic_t intpending;
+ 
++#if defined(_MSC_VER)
++static __inline int dash_intoff(void) {
++	extern int suppressint;
++	return ++suppressint;
++}
++static __inline int dash_inton(void) {
++	extern int suppressint;
++	extern volatile sig_atomic_t intpending;
++	void onint(void);
++	if (--suppressint == 0 && intpending) onint();
++	return 0;
++}
++static __inline int dash_forceinton(void) {
++	extern int suppressint;
++	extern volatile sig_atomic_t intpending;
++	void onint(void);
++	suppressint = 0;
++	if (intpending) onint();
++	return 0;
++}
++static __inline int dash_restoreint(int v) {
++	extern int suppressint;
++	extern volatile sig_atomic_t intpending;
++	void onint(void);
++	if ((suppressint = v) == 0 && intpending) onint();
++	return 0;
++}
++#define barrier() (0)
++#define INTOFF dash_intoff()
++#define INTON dash_inton()
++#define FORCEINTON dash_forceinton()
++#define SAVEINT(v) ((v) = suppressint)
++#define RESTOREINT(v) dash_restoreint(v)
++#else
+ #define barrier() ({ __asm__ __volatile__ ("": : :"memory"); })
+ #define INTOFF \
+ 	({ \
+@@ -112,6 +146,7 @@ void __inton(void);
+ 		if ((suppressint = (v)) == 0 && intpending) onint(); \
+ 		0; \
+ 	})
++#endif
+ #define CLEAR_PENDING_INT intpending = 0
+ #define int_pending() intpending
+ 
+diff --git a/src/eval.c b/src/eval.c
+index 0f2a7ba..13663eb 100644
+--- a/src/eval.c
++++ b/src/eval.c
+@@ -973,7 +973,7 @@ evalbltin(const struct builtincmd *cmd, int argc, char **argv, int flags)
+ 		status = evalcmd(argc, argv, flags);
+ 	else
+ 		status = (*cmd->builtin)(argc, argv);
+-	flushall();
++	sh_flushall();
+ 	if (outerr(out1))
+ 		sh_warnx("%s: I/O error", commandname);
+ 	status |= outerr(out1);
+diff --git a/src/exec.c b/src/exec.c
+index 6fe0fed..9edbd76 100644
+--- a/src/exec.c
++++ b/src/exec.c
+@@ -176,9 +176,11 @@ static const char *legal_pathopt(const char *opt, const char *term, int magic)
+ 		opt = NULL;
+ 		break;
+ 
+-	case 1:
+-		opt = prefix(opt, "builtin") ?: prefix(opt, "func");
++	case 1: {
++		const char *p_pfx = prefix(opt, "builtin");
++		opt = p_pfx ? (char *)p_pfx : prefix(opt, "func");
+ 		break;
++	}
+ 
+ 	default:
+ 		opt += strcspn(opt, term);
+diff --git a/src/expand.c b/src/expand.c
+index 76e67ce..f8b0e5d 100644
+--- a/src/expand.c
++++ b/src/expand.c
+@@ -1191,15 +1191,15 @@ static unsigned ifsisifs(const char *p, unsigned ml, const char *ifs)
+ 			wc = wc2;
+ 		}
+ 
+-		isifs = wcschr(wcifs, wc);
++		isifs = (wcschr(wcifs, wc) != NULL);
+ 		ifs0 = wcifs[0];
+ 	} else if (likely(!ml)) {
+-		isifs = strchr(ifs, wc);
++		isifs = (strchr(ifs, wc) != NULL);
+ 		ifs0 = ifs[0];
+ 	}
+ 
+ 	if (isifs)
+-		isdefifs = iswspace(wc ?: ifs0);
++		isdefifs = iswspace(wc ? wc : ifs0);
+ 
+ out:
+ 	return isifs << 1 | isdefifs;
+@@ -1543,8 +1543,10 @@ expandmeta(struct strlist *str)
+ {
+ 	/* TODO - EXP_REDIR */
+ 
+-	if (GLOB_IS_ENABLED)
+-		return expandmeta_glob(str);
++	if (GLOB_IS_ENABLED) {
++		expandmeta_glob(str);
++		return;
++	}
+ 
+ 	while (str) {
+ 		struct strlist **savelastp;
+@@ -2178,10 +2180,10 @@ casematch(union node *pattern, char *val)
+ 
+ static size_t cvtnum(intmax_t num, int flags)
+ {
+-	int len = max_int_length(sizeof(num));
+-	char buf[len];
++	int len;
++	char buf[64];
+ 
+-	len = fmtstr(buf, len, "%" PRIdMAX, num);
++	len = fmtstr(buf, sizeof(buf), "%" PRIdMAX, num);
+ 	return memtodest(buf, len, flags);
+ }
+ 
+diff --git a/src/input.c b/src/input.c
+index e9b9d33..e636d21 100644
+--- a/src/input.c
++++ b/src/input.c
+@@ -387,7 +387,7 @@ eof:
+ 		parsefile->eof = 3;
+ 		return PEOF;
+ 	}
+-	flushall();
++	sh_flushall();
+ 
+ 	q = parsefile->nextc;
+ 	something = !first;
+diff --git a/src/jobs.c b/src/jobs.c
+index 914b383..c2b41dc 100644
+--- a/src/jobs.c
++++ b/src/jobs.c
+@@ -1536,7 +1536,7 @@ showpipe(struct job *jp, struct output *out)
+ 	for (sp = jp->ps + 1; sp < spend; sp++)
+ 		outfmt(out, " | %s", sp->cmd);
+ 	outcslow('\n', out);
+-	flushall();
++	sh_flushall();
+ }
+ 
+ 
+diff --git a/src/memalloc.h b/src/memalloc.h
+index 1895c1e..77cb0f9 100644
+--- a/src/memalloc.h
++++ b/src/memalloc.h
+@@ -75,19 +75,15 @@ static inline char *_STPUTC(int c, char *p) {
+ 	return p;
+ }
+ 
+-#define stackblock() ((void *)stacknxt)
++#define stackblock() ((char *)stacknxt)
+ #define stackblocksize() stacknleft
+-#define STARTSTACKSTR(p) ((p) = stackblock())
++#define STARTSTACKSTR(p) ((p) = (void *)stackblock())
+ #define STPUTC(c, p) ((p) = _STPUTC((c), (p)))
+-#define CHECKSTRSPACE(n, p) \
+-	({ \
+-		char *_q = (p); \
+-		size_t _l = (n); \
+-		size_t _m = sstrend - _q; \
+-		if (_l > _m) \
+-			(p) = makestrspace(_l, _q); \
+-		0; \
+-	})
++#if defined(_MSC_VER)
++#define CHECKSTRSPACE(n, p) 	do { 		if ((size_t)(n) > (size_t)(sstrend - (p))) 			(p) = makestrspace((n), (p)); 	} while (0)
++#else
++#define CHECKSTRSPACE(n, p) 	({ 		char *_q = (p); 		size_t _l = (n); 		size_t _m = sstrend - _q; 		if (_l > _m) 			(p) = makestrspace(_l, _q); 		0; 	})
++#endif
+ #define USTPUTC(c, p)	(*p++ = (c))
+ #define STACKSTRNUL(p)	((p) == sstrend? (p = growstackstr(), *p = '\0') : (*p = '\0'))
+ #define STUNPUTC(p)	(--p)
+diff --git a/src/miscbltin.c b/src/miscbltin.c
+index e66666c..d6d19ac 100644
+--- a/src/miscbltin.c
++++ b/src/miscbltin.c
+@@ -138,7 +138,7 @@ readcmd(int argc, char **argv)
+ 	if (prompt && isatty(0)) {
+ 		out2str(prompt);
+ #ifdef FLUSHERR
+-		flushall();
++		sh_flushall();
+ #endif
+ 	}
+ 	if (*(ap = argptr) == NULL)
+diff --git a/src/mkinit.c b/src/mkinit.c
+index 2514ebf..84153e1 100644
+--- a/src/mkinit.c
++++ b/src/mkinit.c
+@@ -48,7 +48,14 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <fcntl.h>
++#if !defined(_MSC_VER)
+ #include <unistd.h>
++#else
++#include <io.h>
++#ifndef unlink
++#define unlink _unlink
++#endif
++#endif
+ 
+ 
+ /*
+@@ -395,7 +402,7 @@ output(void)
+ 	for (ep = event ; ep->name ; ep++) {
+ 		fputs("\n\n\n", fp);
+ 		fputs(ep->comment, fp);
+-		fprintf(fp, "\nvoid\n%s(%s) {\n", ep->routine, ep->args ?: "");
++		fprintf(fp, "\nvoid\n%s(%s) {\n", ep->routine, ep->args ? ep->args : "");
+ 		writetext(&ep->code, fp);
+ 		fprintf(fp, "}\n");
+ 	}
+diff --git a/src/output.c b/src/output.c
+index e9ee9b4..e4584ca 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -226,7 +226,7 @@ outcslow(int c, struct output *dest)
+ 
+ 
+ void
+-flushall(void)
++sh_flushall(void)
+ {
+ 	flushout(&output);
+ #ifdef FLUSHERR
+diff --git a/src/output.h b/src/output.h
+index c43d493..4c34fa7 100644
+--- a/src/output.h
++++ b/src/output.h
+@@ -68,7 +68,7 @@ void outstr(const char *, struct output *);
+ #ifndef USE_GLIBC_STDIO
+ void outcslow(int, struct output *);
+ #endif
+-void flushall(void);
++void sh_flushall(void);
+ void flushout(struct output *);
+ void outfmt(struct output *, const char *, ...)
+     __attribute__((__format__(__printf__,2,3)));
+diff --git a/src/parser.c b/src/parser.c
+index e44b3c3..51627df 100644
+--- a/src/parser.c
++++ b/src/parser.c
+@@ -1486,7 +1486,7 @@ badsub:
+ 		if ((newsyn != synstack->syntax || synstack->innerdq) &&
+ 		    subtype != VSNORMAL) {
+ 			synstack_push(&synstack,
+-				      synstack->prev ?:
++				      synstack->prev ? synstack->prev :
+ 				      alloca(sizeof(*synstack)),
+ 				      newsyn);
+ 
+@@ -1532,7 +1532,7 @@ parsebackq: {
+ 
+ 	if (chkeofmark) {
+ 		synstack_push(&synstack,
+-			      synstack->prev ?: alloca(sizeof(*synstack)),
++			      (synstack->prev ? synstack->prev : alloca(sizeof(*synstack))),
+ 			      BASESYNTAX);
+ 		synstack->backq = oldstyle + 1;
+ 		printesc = 1;
+@@ -1640,7 +1640,7 @@ parsebackq_out:
+ parsearith: {
+ 
+ 	synstack_push(&synstack,
+-		      synstack->prev ?: alloca(sizeof(*synstack)),
++		      (synstack->prev ? synstack->prev : alloca(sizeof(*synstack))),
+ 		      ARISYNTAX);
+ 	synstack->dblquote = 1;
+ 	if (chkeofmark)
+diff --git a/src/trap.c b/src/trap.c
+index 23829a5..0a5efff 100644
+--- a/src/trap.c
++++ b/src/trap.c
+@@ -433,7 +433,7 @@ out:
+ 	 */
+ 	if (likely(!setjmp(loc.loc)))
+ 		setjobctl(0);
+-	flushall();
++	sh_flushall();
+ 	_exit(exitstatus);
+ 	/* NOTREACHED */
+ }
+diff --git a/src/var.c b/src/var.c
+index e76abe3..303bfcb 100644
+--- a/src/var.c
++++ b/src/var.c
+@@ -255,10 +255,10 @@ struct var *setvar(const char *name, const char *val, int flags)
+ 
+ intmax_t setvarint(const char *name, intmax_t val, int flags)
+ {
+-	int len = max_int_length(sizeof(val));
+-	char buf[len];
++	int len;
++	char buf[64];
+ 
+-	fmtstr(buf, len, "%" PRIdMAX, val);
++	len = fmtstr(buf, sizeof(buf), "%" PRIdMAX, val);
+ 	setvar(name, buf, flags);
+ 	return val;
+ }
+@@ -353,7 +353,7 @@ lookupvar(const char *name)
+ 
+ intmax_t lookupvarint(const char *name)
+ {
+-	return atomax(lookupvar(name) ?: nullstr, 0);
++	return atomax(lookupvar(name) ? lookupvar(name) : nullstr, 0);
+ }
+ 
+ 

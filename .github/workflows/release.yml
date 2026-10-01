@@ -15,7 +15,7 @@ on:
       version:
         description: 'DASH tag or branch to build'
         required: false
-        default: 'master'
+        default: 'v0.5.13.5'
 
 permissions:
   contents: write
@@ -39,9 +39,14 @@ jobs:
       - name: Checkout dash
         uses: actions/checkout@v7
         with:
-          repository: SamuelMarks/dash
-          ref: master
+          repository: https://git.kernel.org/pub/scm/utils/dash/dash.git
+          ref: ${{ github.event.inputs.version || 'v0.5.13.5' }}
           path: dash
+
+      - name: Apply Windows Build Patch
+        working-directory: dash
+        run: |
+          git apply --ignore-whitespace ../patches/0001-Windows-native-builds.patch
 
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1

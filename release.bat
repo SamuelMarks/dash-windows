@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 set DASH_REF=%~1
-if "%DASH_REF%"=="" set DASH_REF=master
+if "%DASH_REF%"=="" set DASH_REF=v0.5.13.5
 
 echo ==============================================
 echo Building DASH Windows Release (%DASH_REF%)
@@ -12,8 +12,22 @@ if not exist dash (
     if exist ..\dash\src\main.c (
         echo Using local ..\dash repository...
     ) else (
-        echo Cloning DASH from https://github.com/SamuelMarks/dash.git...
-        git clone --branch %DASH_REF% https://github.com/SamuelMarks/dash.git dash
+        echo Cloning DASH from https://git.kernel.org/pub/scm/utils/dash/dash.git...
+        git clone --branch %DASH_REF% --depth 1 https://git.kernel.org/pub/scm/utils/dash/dash.git dash
+    )
+)
+
+if exist dash\src\main.c (
+    if not exist dash\CMakeLists.txt (
+        echo Applying Windows native builds patch...
+        cd dash
+        git apply --ignore-whitespace ..\patches\0001-Windows-native-builds.patch
+        if errorlevel 1 (
+            echo Failed to apply patch
+            cd ..
+            exit /b 1
+        )
+        cd ..
     )
 )
 

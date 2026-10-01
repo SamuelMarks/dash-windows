@@ -1,0 +1,78 @@
+name: Build and Release DASH Windows
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*'
+      - '0.*'
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'DASH tag or branch to build'
+        required: false
+        default: 'master'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout dash-windows
+        uses: actions/checkout@v7
+
+      - name: Checkout auto-win-msvc
+        uses: actions/checkout@v7
+        with:
+          repository: SamuelMarks/auto-win-msvc
+          ref: master
+          path: auto-win-msvc
+
+      - name: Checkout dash
+        uses: actions/checkout@v7
+        with:
+          repository: SamuelMarks/dash
+          ref: master
+          path: dash
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure CMake
+        shell: cmd
+        run: |
+          cmake -B build -S . -DCMAKE_BUILD_TYPE=Release -DFETCHCONTENT_SOURCE_DIR_AUTO_WIN_MSVC=auto-win-msvc -DDASH_SOURCE_DIR=dash
+
+      - name: Build DASH
+        shell: cmd
+        run: |
+          cmake --build build --config Release
+
+      - name: Test DASH
+        shell: cmd
+        run: |
+          ctest --test-dir build -C Release --output-on-failure
+          build\dash_build\Release\dash.exe -c "echo Native Windows DASH execution verified"
+
+      - name: Package with CPack
+        shell: cmd
+        run: |
+          cd build
+          cpack -G ZIP
+          cpack -G NSIS
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: dash-windows-packages
+          path: |
+            build/*.zip
+            build/*.exe

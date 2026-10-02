@@ -50,8 +50,8 @@ if errorlevel 1 exit /b 1
 
 echo Packaging with CPack...
 cd %BUILD_DIR%
-cpack -G ZIP
-cpack -G NSIS
+cpack -C Release -G ZIP
+cpack -C Release -G NSIS
 cd ..
 
 echo Build and packaging complete!

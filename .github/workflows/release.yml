@@ -67,12 +67,20 @@ jobs:
           ctest --test-dir build -C Release --output-on-failure
           build\dash_build\Release\dash.exe -c "echo Native Windows DASH execution verified"
 
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y
+          $nsisPath = if (Test-Path "${env:ProgramFiles(x86)}\NSIS") { "${env:ProgramFiles(x86)}\NSIS" } else { "$env:ProgramFiles\NSIS" }
+          echo "$nsisPath" >> $env:GITHUB_PATH
+          & "$nsisPath\makensis.exe" /VERSION
+
       - name: Package with CPack
         shell: cmd
         run: |
           cd build
-          cpack -G ZIP
-          cpack -G NSIS
+          cpack -C Release -G ZIP
+          cpack -C Release -G NSIS
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7

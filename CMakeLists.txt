@@ -83,6 +83,12 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE-MIT")
 endif()
 
 # Package with CPack
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/CPackConfig.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/CPackConfig.cmake")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/CPackSourceConfig.cmake")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/CPackSourceConfig.cmake")
+endif()
 
 enable_testing()
 add_test(NAME test_dash_echo COMMAND dash -c "echo DASH native build successful")

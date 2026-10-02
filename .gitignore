@@ -4,6 +4,7 @@ dash/
 
 # Build and Output Directories
 build*/
+_CPack_Packages/
 *.msi
 *.zip
 

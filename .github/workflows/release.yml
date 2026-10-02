@@ -39,7 +39,7 @@ jobs:
       - name: Checkout dash
         uses: actions/checkout@v7
         with:
-          repository: https://git.kernel.org/pub/scm/utils/dash/dash.git
+          repository: SamuelMarks/dash
           ref: ${{ github.event.inputs.version || 'v0.5.13.5' }}
           path: dash
 
